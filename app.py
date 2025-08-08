@@ -14,20 +14,21 @@ import PyPDF2
 from adzuna_api import fetch_jobs
 
 # ==================== LLM / KEYS ====================
-# Load .env only if present and DO NOT override env vars coming from Render.
+# Load .env only if present and DO NOT override Render env vars.
 for p in (Path("/etc/secrets/.env"), Path(".env")):
     if p.exists():
         load_dotenv(p, override=False)
 
 # Prefer Render environment values
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_PROJECT = os.getenv("OPENAI_PROJECT")   # needed for sk-proj-* keys
+OPENAI_PROJECT = os.getenv("OPENAI_PROJECT")   # needed for sk-proj-* keys (env var only)
 OPENAI_ORG = os.getenv("OPENAI_ORG_ID")       # optional
 
+# Expose env vars for libraries that read from os.environ
 if OPENAI_KEY:
     os.environ["OPENAI_API_KEY"] = OPENAI_KEY
 if OPENAI_PROJECT:
-    os.environ["OPENAI_PROJECT"] = OPENAI_PROJECT
+    os.environ["OPENAI_PROJECT"] = OPENAI_PROJECT  # relied on by OpenAI SDK; we won't pass it in code
 if OPENAI_ORG:
     os.environ["OPENAI_ORG_ID"] = OPENAI_ORG
 
@@ -46,13 +47,13 @@ LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # safe, current
 llm = None
 if LANGCHAIN_OK and OPENAI_KEY:
     try:
-        # Pass project/org explicitly so sk-proj keys work
+        # NOTE: do NOT pass project= here (some versions don't support it).
+        # The OpenAI SDK will read OPENAI_PROJECT from env if you're using sk-proj keys.
         llm = ChatOpenAI(
             model=LLM_MODEL,
             temperature=0,
             openai_api_key=OPENAI_KEY,
-            project=OPENAI_PROJECT,
-            organization=OPENAI_ORG,
+            organization=OPENAI_ORG,  # fine if None
         )
     except Exception as e:
         llm = None
@@ -315,7 +316,7 @@ else:
             c_head, c_cta = st.columns([0.78, 0.22])
             with c_head:
                 st.markdown(f"""
-<div class="job-head"><h4 class="job-title"> {title}</h4></div>
+<div class="job-head"><h4 class="job-title">🧑‍💼 {title}</h4></div>
 <p style="margin:4px 0 0 0;"><strong>{company}</strong> · {category_disp}</p>
 <div class="badges">
   <span class="badge cyan">📍 {location_disp}</span>
