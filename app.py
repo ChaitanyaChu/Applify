@@ -3,6 +3,7 @@ import re
 import textwrap
 import base64
 from pathlib import Path
+from inspect import signature
 
 import requests
 import streamlit as st
@@ -34,7 +35,15 @@ except Exception:
     OpenAI = None
     PromptTemplate = None
 
-from adzuna_api import fetch_jobs
+from adzuna_api import fetch_jobs  # we’ll call this via safe_fetch_jobs
+
+# ---------- Safe wrapper so extra kwargs never break ----------
+def safe_fetch_jobs(**kwargs):
+    # Import fresh each call (avoids stale module issues)
+    from adzuna_api import fetch_jobs as _fetch
+    sig = signature(_fetch)
+    filtered = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    return _fetch(**filtered)
 
 # -------------------- Keys / LLM --------------------
 OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -214,17 +223,17 @@ def _fetch_with_page(page: int):
     if not f:
         return
     with st.spinner("Loading jobs..."):
-        st.session_state.jobs = fetch_jobs(
+        st.session_state.jobs = safe_fetch_jobs(
             query=f["query"],
             location=f["location"],
             results_limit=f["results_per_page"],
             page=page,
             country=f["country"],
-            sort_by=f["sort_by"],
-            salary_min=f["salary_min"],
-            salary_max=f["salary_max"],
-            category=f["category"],
-            distance=f["distance"],
+            sort_by=f.get("sort_by"),      # dropped automatically if not supported
+            salary_min=f.get("salary_min"),
+            salary_max=f.get("salary_max"),
+            category=f.get("category"),
+            distance=f.get("distance"),
         )
         st.session_state.desc_open = {}
 
