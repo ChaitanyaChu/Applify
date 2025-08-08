@@ -315,7 +315,7 @@ else:
             c_head, c_cta = st.columns([0.78, 0.22])
             with c_head:
                 st.markdown(f"""
-<div class="job-head"><h4 class="job-title">🧑‍💼 {title}</h4></div>
+<div class="job-head"><h4 class="job-title"> {title}</h4></div>
 <p style="margin:4px 0 0 0;"><strong>{company}</strong> · {category_disp}</p>
 <div class="badges">
   <span class="badge cyan">📍 {location_disp}</span>
