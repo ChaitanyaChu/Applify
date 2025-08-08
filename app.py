@@ -14,14 +14,22 @@ import PyPDF2
 from adzuna_api import fetch_jobs
 
 # ==================== LLM / KEYS ====================
-# Load secrets when running locally; Render uses env vars directly.
+# Load .env only if present and DO NOT override env vars coming from Render.
 for p in (Path("/etc/secrets/.env"), Path(".env")):
     if p.exists():
-        load_dotenv(p, override=True)
+        load_dotenv(p, override=False)
 
+# Prefer Render environment values
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_PROJECT = os.getenv("OPENAI_PROJECT")   # needed for sk-proj-* keys
+OPENAI_ORG = os.getenv("OPENAI_ORG_ID")       # optional
+
 if OPENAI_KEY:
-    os.environ["OPENAI_API_KEY"] = OPENAI_KEY  # make sure libs see it
+    os.environ["OPENAI_API_KEY"] = OPENAI_KEY
+if OPENAI_PROJECT:
+    os.environ["OPENAI_PROJECT"] = OPENAI_PROJECT
+if OPENAI_ORG:
+    os.environ["OPENAI_ORG_ID"] = OPENAI_ORG
 
 # Try to import langchain bits; app still works without LLM.
 try:
@@ -33,12 +41,21 @@ except Exception:
     ChatOpenAI = None
     PromptTemplate = None
 
-LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # safe default, current
+LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # safe, current
+
 llm = None
 if LANGCHAIN_OK and OPENAI_KEY:
     try:
-        llm = ChatOpenAI(model=LLM_MODEL, temperature=0)
+        # Pass project/org explicitly so sk-proj keys work
+        llm = ChatOpenAI(
+            model=LLM_MODEL,
+            temperature=0,
+            openai_api_key=OPENAI_KEY,
+            project=OPENAI_PROJECT,
+            organization=OPENAI_ORG,
+        )
     except Exception as e:
+        llm = None
         st.error(f"OpenAI init failed: {e}")
 
 # ==================== PAGE CONFIG ====================
@@ -359,7 +376,7 @@ else:
 
             if st.button("🚀 Generate Score", key=f"generate_score_{i}"):
                 if llm is None:
-                    st.error("LLM not initialized. Set OPENAI_API_KEY on Render and ensure langchain-openai/langchain/openai are installed.")
+                    st.error("LLM not initialized. Check OPENAI_API_KEY / OPENAI_PROJECT on Render and packages installed.")
                 elif not resume_text.strip():
                     st.error("❌ Please provide your resume.")
                 else:
