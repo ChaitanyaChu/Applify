@@ -2,8 +2,8 @@
 import os
 import requests
 
+# Load .env locally; on Render you can use env vars or a Secret File
 try:
-    # Load .env locally; on Render you can use env vars or a Secret File
     from dotenv import load_dotenv
     load_dotenv()
 except Exception:
@@ -30,12 +30,12 @@ def fetch_jobs(
     salary_max: int | None = None,     # optional
     category: str | None = None,       # e.g. "it-jobs" (optional)
     distance: int | None = None,       # miles (optional)
+    **kwargs,                           # absorb any extra args safely
 ):
     """
     Fetch jobs from Adzuna. Supports the same kwargs your app.py passes.
     Returns a list of job dicts; [] on error or if creds are missing.
     """
-
     if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
         return []
 
@@ -54,7 +54,7 @@ def fetch_jobs(
         "sort_by": sort_by if sort_by in ("relevance", "date") else "relevance",
     }
 
-    # Optional filters: only include if provided
+    # Optional filters: include only when provided
     if salary_min:
         params["salary_min"] = int(salary_min)
     if salary_max:
@@ -64,7 +64,7 @@ def fetch_jobs(
     if distance:
         params["distance"] = int(distance)
 
-    # Drop empty/None values so we don't send bad params
+    # Drop empty/None so we don't send bad params
     params = {k: v for k, v in params.items() if v not in (None, "", 0)}
 
     headers = {"User-Agent": "Applify/1.0"}
@@ -76,3 +76,4 @@ def fetch_jobs(
         return data.get("results", []) or []
     except requests.RequestException:
         return []
+
