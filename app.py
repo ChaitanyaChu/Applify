@@ -34,11 +34,7 @@ except Exception:
     OpenAI = None
     PromptTemplate = None
 
-from adzuna_api import (
-    fetch_jobs,
-    adzuna_ping,
-    build_request,
-)
+from adzuna_api import fetch_jobs
 
 # -------------------- Keys / LLM --------------------
 OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -265,47 +261,6 @@ with st.sidebar:
         ["Any", "Entry level", "Mid level", "Senior level", "Director", "Executive"],
         key="filter_experience"
     )
-
-    # Debug tools
-    with st.expander("🔧 Debug (Adzuna)"):
-        from adzuna_api import _get_secret_now  # read current secrets
-        aid = _get_secret_now("ADZUNA_APP_ID")
-        akey = _get_secret_now("ADZUNA_APP_KEY")
-        tail = lambda s: ("*"*6 + s[-4:]) if s else None
-        st.caption(f"App ID set: {bool(aid)} ({tail(aid)}) • App Key set: {bool(akey)} ({tail(akey)})")
-
-        # Build the exact request the app will send
-        url_dbg, params_dbg = build_request(
-            query=query,
-            location=location,
-            results_limit=results_per_page,
-            page=st.session_state.get("current_page", 1),
-            country=country,
-            sort_by=sort_by,
-            salary_min=salary_min if salary_min and salary_min > 0 else None,
-            salary_max=salary_max if salary_max and salary_max > 0 else None,
-            category=category or None,
-            distance=distance if distance and distance > 0 else None,
-        )
-        st.code("GET " + url_dbg)
-        sanitized = {**params_dbg}
-        if "app_id" in sanitized:  sanitized["app_id"]  = "***" + str(sanitized["app_id"])[-4:]
-        if "app_key" in sanitized: sanitized["app_key"] = "***" + str(sanitized["app_key"])[-4:]
-        st.json(sanitized)
-
-        if st.button("Run ping"):
-            st.json(adzuna_ping(country=country))
-
-        if st.button("Run test fetch (raw)"):
-            import requests as _rq
-            r = _rq.get(url_dbg, params=params_dbg, timeout=15)
-            st.write("Status:", r.status_code)
-            try:
-                js = r.json()
-                st.write("results count:", len(js.get("results", [])))
-                st.json(js.get("results", [])[:2])
-            except Exception:
-                st.text(r.text[:800])
 
     if st.button("🔎 Search Jobs", use_container_width=True, key="filter_search_btn"):
         st.session_state.filters = {
@@ -562,3 +517,4 @@ with col_next_b:
         st.session_state.current_page += 1
         _fetch_with_page(st.session_state.current_page)
         st.rerun()
+
