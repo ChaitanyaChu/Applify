@@ -3,14 +3,17 @@ import os
 import requests
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+# Load .env for local dev only; DO NOT override Render env vars.
+for p in (Path("/etc/secrets/.env"), Path(".env")):
+    if p.exists():
+        load_dotenv(p, override=False)
 
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID")
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY")
 
 BASE_URL_TEMPLATE = "https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
-
 
 def _build_params(
     query: str,
@@ -32,7 +35,7 @@ def _build_params(
         "results_per_page": results_limit,
         "what": query or "",
         "where": location or "",
-        "sort_by": sort_by or "relevance",   # "relevance" or "date"
+        "sort_by": sort_by or "relevance",  # "relevance" or "date"
     }
     if salary_min is not None:
         params["salary_min"] = salary_min
@@ -43,11 +46,9 @@ def _build_params(
     if distance is not None and distance > 0:
         params["distance"] = distance
     if remote is not None:
-        # Supported in some locales; harmless if ignored
-        params["remote"] = str(remote).lower()
+        params["remote"] = str(remote).lower()  # not supported everywhere; harmless
 
     return params
-
 
 def fetch_jobs(
     query: str = "data analyst",
@@ -65,8 +66,8 @@ def fetch_jobs(
     return_debug: bool = False,
 ) -> List[Dict[str, Any]] | Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Fetch jobs from Adzuna. If return_debug=True, returns (jobs, debug_meta).
-    debug_meta includes url, params, status_code, and any error text.
+    Fetch jobs from Adzuna. If return_debug=True, returns (jobs, debug_meta)
+    where debug_meta includes url, params, status_code, and any error text.
     """
     url = BASE_URL_TEMPLATE.format(country=country.lower(), page=max(1, int(page)))
     params = _build_params(
@@ -82,7 +83,7 @@ def fetch_jobs(
     )
     headers = {
         "Accept": "application/json",
-        "User-Agent": "JobMatchApp/1.0 (+https://example.local)"  # UA helps sometimes
+        "User-Agent": "Applify/1.0 (+https://example.local)"
     }
 
     debug: Dict[str, Any] = {"url": url, "params": params, "status_code": None, "error": None}
