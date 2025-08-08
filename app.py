@@ -13,39 +13,33 @@ import PyPDF2
 
 from adzuna_api import fetch_jobs
 
-# ==================== KEY / LLM SETUP ====================
-# Load .env if present (local) and also support Render secret file path
+# ==================== LLM / KEYS ====================
+# Load secrets when running locally; Render uses env vars directly.
 for p in (Path("/etc/secrets/.env"), Path(".env")):
     if p.exists():
         load_dotenv(p, override=True)
 
-# Normalize key for langchain_openai
-OPENAI_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 if OPENAI_KEY:
-    os.environ["OPENAI_API_KEY"] = OPENAI_KEY
+    os.environ["OPENAI_API_KEY"] = OPENAI_KEY  # make sure libs see it
 
-# Try to import LangChain/OpenAI but don’t crash if missing
+# Try to import langchain bits; app still works without LLM.
 try:
-    from langchain_openai import OpenAI  # pip install langchain-openai openai langchain
+    from langchain_openai import ChatOpenAI
     from langchain.prompts import PromptTemplate
     LANGCHAIN_OK = True
 except Exception:
     LANGCHAIN_OK = False
-    OpenAI = None
+    ChatOpenAI = None
     PromptTemplate = None
 
-LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo-instruct")
+LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # safe default, current
 llm = None
 if LANGCHAIN_OK and OPENAI_KEY:
     try:
-        llm = OpenAI(model=LLM_MODEL)
+        llm = ChatOpenAI(model=LLM_MODEL, temperature=0)
     except Exception as e:
-        llm = None
         st.error(f"OpenAI init failed: {e}")
-else:
-    # Only show one clear message; the rest of the app still works
-    if not OPENAI_KEY:
-        st.warning("Resume scoring is disabled: set OPENAI_API_KEY in Render → Environment.")
 
 # ==================== PAGE CONFIG ====================
 st.set_page_config(
@@ -133,7 +127,7 @@ def job_remote_label(job) -> str:
         return "Remote"
     desc = (job.get("description") or "").lower()
     title = (job.get("title") or "").lower()
-    if any(k in desc or k in title for k in ["remote", "work from home", "wfh", "hybrid"]):
+    if any(k in desc or k in title for k in ["remote","work from home","wfh","hybrid"]):
         return "Remote / Hybrid"
     return "On-site"
 
@@ -365,7 +359,7 @@ else:
 
             if st.button("🚀 Generate Score", key=f"generate_score_{i}"):
                 if llm is None:
-                    st.error("❌ LLM not initialized. Set OPENAI_API_KEY on Render and ensure `langchain-openai` is installed.")
+                    st.error("LLM not initialized. Set OPENAI_API_KEY on Render and ensure langchain-openai/langchain/openai are installed.")
                 elif not resume_text.strip():
                     st.error("❌ Please provide your resume.")
                 else:
@@ -400,16 +394,16 @@ Missing Keywords:
 New Bullet Ideas:
 - ...
 """.strip()
-                        prompt = PromptTemplate.from_template(textwrap.dedent(prompt_template))
+                        prompt = PromptTemplate.from_template(prompt_template)
                         final_prompt = prompt.format(
                             resume=resume_text,
                             job_description=jd_text,
                             custom=(custom_instructions or "None"),
                         )
                         with st.spinner("Analyzing your resume..."):
-                            response = llm.invoke(final_prompt)
+                            resp = llm.invoke(final_prompt)
                         st.subheader("📊 Match Score & Suggestions")
-                        st.write(response)
+                        st.write(resp.content)  # ChatOpenAI returns an AIMessage; use .content
                     except ValidationError as ve:
                         st.error(f"⚠️ Validation failed: {ve}")
                     except Exception as e:
