@@ -8,7 +8,7 @@ import requests
 import streamlit as st
 from pydantic import BaseModel, ValidationError
 
-
+# Optional imports (app still runs without these)
 try:
     import docx
 except Exception:
@@ -24,15 +24,13 @@ except Exception:
     OpenAI = None
     PromptTemplate = None
 
-from adzuna_api import fetch_jobs
+from adzuna_api import fetch_jobs, adzuna_ping, ADZUNA_APP_ID, ADZUNA_APP_KEY
 
 # -------------------- Secrets / Keys --------------------
-# Prefer Streamlit secrets on Cloud, fall back to environment locally
 OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 if OPENAI_KEY:
     os.environ["OPENAI_API_KEY"] = OPENAI_KEY
 
-# LangChain/OpenAI LLM (optional if you use the scorer)
 LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo-instruct")
 llm = OpenAI(model=LLM_MODEL) if OpenAI else None
 
@@ -57,27 +55,20 @@ st.markdown("""
   --chip-purple-text:#3730a3;
 }
 
-/* App background */
 html, body, .block-container { background: #f8fafc !important; }
-
-/* Hide Streamlit's built-in multipage nav ("app", "Resume Scorer", etc.) */
 [data-testid="stSidebarNav"] { display:none !important; }
 
-/* Fixed sidebar with cyan ↔ purple gradient */
 [data-testid="stSidebar"]{
   background: linear-gradient(180deg, #ecfeff 0%, #eef2ff 100%) !important;
   border-right: 1px solid #e6e6e6;
 }
 [data-testid="stSidebar"] * { color:#0f172a !important; }
 
-/* Bump top padding so content clears the toolbar and logo isn't clipped */
 .block-container { padding-top: 2.75rem !important; }
 
-/* Logo container */
 .brand-logo { display:flex; justify-content:center; margin: 28px 0 8px; }
 .brand-title { text-align:center; font-size:1.55rem; font-weight:800; margin-top:4px; }
 
-/* Job card */
 .job-card {
   border:1px solid var(--border);
   background: var(--card-bg);
@@ -89,7 +80,6 @@ html, body, .block-container { background: #f8fafc !important; }
 .job-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
 .job-title { margin:0; font-size: 1.3rem; }
 
-/* Apply button */
 .apply-btn {
   display:inline-block;
   padding: 10px 24px;
@@ -105,7 +95,6 @@ html, body, .block-container { background: #f8fafc !important; }
 .apply-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(0, 114, 255, 0.36); }
 .right { display:flex; justify-content:flex-end; align-items:flex-start; }
 
-/* Chips */
 .badges { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 .badge {
   display:inline-flex; align-items:center; gap:8px; padding:8px 14px;
@@ -114,13 +103,12 @@ html, body, .block-container { background: #f8fafc !important; }
 .badge.cyan { background: var(--chip-cyan); color: var(--chip-cyan-text); }
 .badge.purple { background: var(--chip-purple); color: var(--chip-purple-text); }
 
-/* Dividers & text */
 .hr { height: 1px; background: var(--border); margin:14px 0; }
 .desc { line-height: 1.65; color:#0f172a; font-size: 1.02rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- Logo (Applify) --------------------
+# -------------------- Logo --------------------
 logo_path = Path(__file__).parent / "applify_logo.png"
 if logo_path.exists():
     b64 = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
@@ -144,22 +132,9 @@ def extract_text_from_docx(uploaded_file):
     if not docx:
         return ""
     try:
-        doc = docx.Document(uploaded_file)
-        return "\n".join([para.text for para in doc.paragraphs])
+        d = docx.Document(uploaded_file)
+        return "\n".join(p.text for p in d.paragraphs)
     except Exception:
-        return ""
-
-def read_uploaded_file(uploaded_file):
-    if uploaded_file is None:
-        return ""
-    file_type = uploaded_file.name.lower()
-    if file_type.endswith(".pdf"):
-        return extract_text_from_pdf(uploaded_file)
-    elif file_type.endswith(".docx"):
-        return extract_text_from_docx(uploaded_file)
-    elif file_type.endswith(".txt"):
-        return uploaded_file.read().decode("utf-8", errors="ignore")
-    else:
         return ""
 
 def job_remote_label(job) -> str:
@@ -172,7 +147,6 @@ def job_remote_label(job) -> str:
     return "On-site"
 
 def split_description(text: str, limit: int = 1200):
-    """Return (preview_with_ellipsis, remainder) split at a word boundary."""
     if not text:
         return "", ""
     raw = re.sub(r"\s+", " ", text).strip()
@@ -181,12 +155,9 @@ def split_description(text: str, limit: int = 1200):
     cut = raw.rfind(" ", 0, limit)
     if cut == -1:
         cut = limit
-    preview = raw[:cut].rstrip()
-    remainder = raw[cut:].lstrip()
-    return preview + "…", remainder
+    return raw[:cut].rstrip() + "…", raw[cut:].lstrip()
 
 def try_fetch_full_text(url: str) -> str:
-    """Best-effort fetch of full JD from redirect_url (optional; needs beautifulsoup4)."""
     if not url:
         return ""
     try:
@@ -211,15 +182,6 @@ def try_fetch_full_text(url: str) -> str:
     except Exception:
         return ""
 
-def normalize_experience(text: str) -> str:
-    t = (text or "").lower()
-    if any(k in t for k in ["intern", "graduate", "junior", "entry"]): return "entry"
-    if any(k in t for k in ["mid", "intermediate", "ii", "2-4", "2+", "3+", "associate"]): return "mid"
-    if any(k in t for k in ["senior", "sr.", "sr ", "iii", "lead", "staff", "5+", "6+"]): return "senior"
-    if "director" in t: return "director"
-    if any(k in t for k in ["vp", "vice president", "executive", "head of"]): return "executive"
-    return "any"
-
 def format_posted_date(created: str) -> str:
     if not created:
         return "Job Posted on —"
@@ -235,7 +197,7 @@ if "jobs" not in st.session_state: st.session_state.jobs = []
 if "selected_job_index" not in st.session_state: st.session_state.selected_job_index = None
 if "desc_open" not in st.session_state: st.session_state.desc_open = {}
 if "current_page" not in st.session_state: st.session_state.current_page = 1
-if "filters" not in st.session_state: st.session_state.filters = None  # remember filters for paging
+if "filters" not in st.session_state: st.session_state.filters = None
 
 def _fetch_with_page(page: int):
     f = st.session_state.filters
@@ -252,7 +214,6 @@ def _fetch_with_page(page: int):
             salary_min=f["salary_min"],
             salary_max=f["salary_max"],
             category=f["category"],
-            remote=f["remote_param"],
             distance=f["distance"],
         )
         st.session_state.desc_open = {}
@@ -264,7 +225,6 @@ with st.sidebar:
     query = st.text_input("Job title / keywords", value="Data Analyst", key="filter_query")
     location = st.text_input("Location (city/state/country)", value="Texas", key="filter_location")
 
-    # Country full names -> codes
     country_map = {
         "United States": "us",
         "United Kingdom": "gb",
@@ -284,21 +244,20 @@ with st.sidebar:
     salary_min, salary_max = st.slider("Salary range (USD)", 0, 300_000, (0, 0), step=5_000, key="filter_salary")
     category = st.text_input("Category (Adzuna slug, e.g. it-jobs)", value="", key="filter_category")
     distance = st.number_input("Distance (miles)", min_value=0, value=0, step=5, key="filter_distance")
-    remote_filter = st.selectbox("Remote", ["Any", "Remote only", "On-site only"], key="filter_remote")
 
+    remote_filter = st.selectbox("Remote", ["Any", "Remote only", "On-site only"], key="filter_remote")
     experience_level = st.selectbox(
         "Experience Level",
         ["Any", "Entry level", "Mid level", "Senior level", "Director", "Executive"],
         key="filter_experience"
     )
 
-    if st.button("🔎 Search Jobs", use_container_width=True, key="filter_search_btn"):
-        remote_param = None
-        if remote_filter == "Remote only":
-            remote_param = True
-        elif remote_filter == "On-site only":
-            remote_param = False
+    with st.expander("🔧 Debug (Adzuna)"):
+        st.caption(f"App ID set: {bool(ADZUNA_APP_ID)} • App Key set: {bool(ADZUNA_APP_KEY)}")
+        if st.button("Run ping"):
+            st.json(adzuna_ping(country=country))
 
+    if st.button("🔎 Search Jobs", use_container_width=True, key="filter_search_btn"):
         st.session_state.filters = {
             "query": query,
             "location": location,
@@ -308,7 +267,6 @@ with st.sidebar:
             "salary_min": salary_min if salary_min and salary_min > 0 else None,
             "salary_max": salary_max if salary_max and salary_max > 0 else None,
             "category": category or None,
-            "remote_param": remote_param,
             "distance": distance if distance and distance > 0 else None,
             "country_name": country_name,
             "remote_filter": remote_filter,
@@ -320,16 +278,17 @@ with st.sidebar:
 # -------------------- Results --------------------
 jobs = st.session_state.jobs
 filters = st.session_state.filters
-country_name = filters["country_name"] if filters else "—"
-sort_by = filters["sort_by"] if filters else "relevance"
-remote_filter = filters["remote_filter"] if filters else "Any"
-experience_level = filters["experience_level"] if filters else "Any"
-salary_min = filters["salary_min"] if filters else 0
-salary_max = filters["salary_max"] if filters else 0
 
 if not jobs:
     st.info("Use the filters on the left and click **Search Jobs**.")
     st.stop()
+
+country_name = filters["country_name"]
+sort_by = filters["sort_by"]
+remote_filter = filters["remote_filter"]
+experience_level = filters["experience_level"]
+salary_min = filters["salary_min"]
+salary_max = filters["salary_max"]
 
 def client_side_filter(job) -> bool:
     # Remote
@@ -339,36 +298,24 @@ def client_side_filter(job) -> bool:
             return False
         if remote_filter == "On-site only" and label.startswith("Remote"):
             return False
-    # Salary overlap check
+    # Salary overlap
     smin_job = job.get("salary_min")
     smax_job = job.get("salary_max")
-    if salary_min and salary_min > 0 and smax_job not in (None, 0):
-        if smax_job < salary_min:
-            return False
-    if salary_max and salary_max > 0 and smin_job not in (None, 0):
-        if smin_job > salary_max:
-            return False
-    # Experience
+    if salary_min and smax_job not in (None, 0) and smax_job < salary_min:
+        return False
+    if salary_max and smin_job not in (None, 0) and smin_job > salary_max:
+        return False
+    # Experience (heuristic on title/experience field)
     if experience_level != "Any":
         level_map = {
-            "Entry level": "entry",
-            "Mid level": "mid",
-            "Senior level": "senior",
-            "Director": "director",
-            "Executive": "executive",
+            "Entry level": ["intern", "graduate", "junior", "entry"],
+            "Mid level": ["mid", "intermediate", "associate", "ii", "2+", "3+"],
+            "Senior level": ["senior", "sr.", "iii", "lead", "staff", "5+", "6+"],
+            "Director": ["director"],
+            "Executive": ["vp", "vice president", "executive", "head of"],
         }
-        desired = level_map[experience_level]
-        title = (job.get("title") or "")
-        exp_field = (job.get("experience") or "")
-        combined = f"{title} {exp_field}".lower()
-        def norm_exp(t: str) -> str:
-            if any(k in t for k in ["intern", "graduate", "junior", "entry"]): return "entry"
-            if any(k in t for k in ["mid", "intermediate", "ii", "2-4", "2+", "3+", "associate"]): return "mid"
-            if any(k in t for k in ["senior", "sr.", "sr ", "iii", "lead", "staff", "5+", "6+"]): return "senior"
-            if "director" in t: return "director"
-            if any(k in t for k in ["vp", "vice president", "executive", "head of"]): return "executive"
-            return "any"
-        if norm_exp(combined) not in (desired, "any"):
+        hay = f"{job.get('title','')} {job.get('experience','')}".lower()
+        if not any(k in hay for k in level_map[experience_level]):
             return False
     return True
 
@@ -405,7 +352,6 @@ for i, job in enumerate(jobs_filtered):
     url = job.get('redirect_url', '#')
     title = job.get('title', 'No Title')
 
-    # Salary
     salary_str = "—"
     if job.get("salary_min") or job.get("salary_max"):
         smin = job.get("salary_min") or 0
@@ -414,7 +360,7 @@ for i, job in enumerate(jobs_filtered):
         elif smax:        salary_str = f"Up to ${int(smax):,}"
         elif smin:        salary_str = f"From ${int(smin):,}"
 
-    # Description (optional full fetch if very short)
+    # Description (optionally extend from redirect_url if short)
     full_desc = job.get('description', '') or ''
     if len(full_desc) < 500 and url:
         fetched = try_fetch_full_text(url)
@@ -465,13 +411,13 @@ for i, job in enumerate(jobs_filtered):
                 st.session_state.desc_open[key_open] = False
                 st.rerun()
 
-        # -------- Resume Scorer (optional; only if OpenAI installed/configured) --------
+        # Resume scorer trigger (optional)
         if st.button(f"⚙️ Score My Resume for: {title}", key=f"select_btn_{i}"):
             st.session_state.selected_job_index = i
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Scoring panel
+    # If scorer opened
     if st.session_state.selected_job_index == i:
         st.markdown("---")
         st.subheader("📄 Resume Feedback & Scoring")
@@ -483,11 +429,10 @@ for i, job in enumerate(jobs_filtered):
             if resume_input_type == "Upload File":
                 resume_file = st.file_uploader("Upload your resume", type=["txt", "pdf", "docx"], key=f"resume_file_{i}")
                 if resume_file:
-                    # Tiny helper for reading files here
                     ext = (resume_file.name or "").lower()
-                    if ext.endswith(".pdf"):
+                    if ext.endswith(".pdf") and PyPDF2:
                         resume_text = extract_text_from_pdf(resume_file)
-                    elif ext.endswith(".docx"):
+                    elif ext.endswith(".docx") and docx:
                         resume_text = extract_text_from_docx(resume_file)
                     else:
                         resume_text = resume_file.read().decode("utf-8", errors="ignore")
@@ -511,11 +456,8 @@ for i, job in enumerate(jobs_filtered):
                 st.error("❌ Please provide your resume.")
             else:
                 try:
-                    # validate
                     _ = ResumeJobInput(resume=resume_text, job_description=jd_text)
-                    # prompt
-                    from langchain.prompts import PromptTemplate as _PT  # safe import if available
-                    tmpl = _PT.from_template(textwrap.dedent("""
+                    tmpl = PromptTemplate.from_template(textwrap.dedent("""
                         You are a strict but helpful career advisor. Evaluate how well the resume matches the job description.
                         1) Give an overall match score from 1 to 10.
                         2) List 5 specific, actionable suggestions for improving the resume for THIS job.
