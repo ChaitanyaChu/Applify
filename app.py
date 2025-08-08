@@ -517,4 +517,3 @@ with col_next_b:
         st.session_state.current_page += 1
         _fetch_with_page(st.session_state.current_page)
         st.rerun()
-
